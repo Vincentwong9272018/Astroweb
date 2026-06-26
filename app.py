@@ -7,7 +7,7 @@ import os
 import io
 import numpy as np
 import swisseph as swe
-from geopy.geocoders import Nominatim
+from geopy.geocoders import ArcGIS  # 👈 改成這行
 from timezonefinder import TimezoneFinder
 import pytz
 
