@@ -160,7 +160,7 @@ def draw_astrology_chart(positions, asc_degree, cusps, orb_map, aspect_system):
 def resolve_location_and_time(loc_name, y, m, d, h, minute):
     if not loc_name: 
         raise ValueError("城市名稱不能為空！")
-    location = Nominatim(user_agent="astro_st_app", timeout=10).geocode(loc_name)
+    location = ArcGIS(timeout=10).geocode(loc_name)
     if not location: 
         raise ValueError(f"無法定位城市: '{loc_name}'")
     
