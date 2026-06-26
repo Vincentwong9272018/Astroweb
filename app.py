@@ -183,7 +183,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     return jd, lat, lon, info, utc_dt
 
 # ================= 3. Streamlit UI 介面 =================
-st.title("🔮 進階專業星盤推運系統")
+st.title("🔮 Mr Vincent星盤系統")
 custom_orbs = {"合相": 8.0, "對相": 8.0, "三分": 7.0, "四分": 7.0, "六分": 6.0}
 
 # --- 側邊欄設定 ---
