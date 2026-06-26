@@ -179,9 +179,9 @@ name = st.sidebar.text_input("姓名", "Vincent")
 gender = st.sidebar.selectbox("性別", ["男", "女"])
 
 col1, col2, col3 = st.sidebar.columns(3)
-n_year = col1.number_input("年", value=1993, step=1)
-n_month = col2.number_input("月", value=9, min_value=1, max_value=12)
-n_day = col3.number_input("日", value=27, min_value=1, max_value=31)
+n_year = col1.number_input("年", value=1990, step=1)
+n_month = col2.number_input("月", value=1, min_value=1, max_value=12)
+n_day = col3.number_input("日", value=1, min_value=1, max_value=31)
 
 col4, col5 = st.sidebar.columns(2)
 n_hour = col4.number_input("時", value=12, min_value=0, max_value=23)
