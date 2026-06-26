@@ -202,7 +202,7 @@ n_minute = col5.number_input("分", value=0, min_value=0, max_value=59)
 n_loc = st.sidebar.text_input("出生城市", "Manchester")
 
 st.sidebar.divider()
-st.sidebar.header("推運 / 行運 / 日返設定")
+st.sidebar.header("推運設定")
 col6, col7, col8 = st.sidebar.columns(3)
 p_year = col6.number_input("推運 年", value=2026, step=1)
 p_month = col7.number_input("推運 月", value=6, min_value=1, max_value=12)
