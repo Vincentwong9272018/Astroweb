@@ -40,6 +40,17 @@ LILLY_MOITIES = {
     '天王星': 2.5, '海王星': 2.5, '冥王星': 2.5, '北交點': 2.5, '上升': 0.0, '中天': 0.0
 }
 
+# 【新增】古典尊貴力量對應表 (0:牡羊, 1:金牛... 11:雙魚)
+DIGNITIES = {
+    '太陽': {'廟': [4], '旺': [0], '弱': [10], '陷': [6]},
+    '月亮': {'廟': [3], '旺': [1], '弱': [9], '陷': [7]},
+    '水星': {'廟': [2, 5], '旺': [5], '弱': [8, 11], '陷': [11]},
+    '金星': {'廟': [1, 6], '旺': [11], '弱': [7, 0], '陷': [5]},
+    '火星': {'廟': [0, 7], '旺': [9], '弱': [6, 1], '陷': [3]},
+    '木星': {'廟': [8, 11], '旺': [3], '弱': [2, 5], '陷': [9]},
+    '土星': {'廟': [9, 10], '旺': [6], '弱': [3, 4], '陷': [0]}
+}
+
 # ================= 2. 核心函數 =================
 EPHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ephe')
 swe.set_ephe_path(EPHE_PATH)
@@ -51,7 +62,7 @@ def format_degree(lon):
     if mins == 60:
         mins = 0; deg += 1
         if deg == 30: deg = 0; idx = (idx + 1) % 12
-    return f"{ZODIAC_NAMES[idx]}({deg}°{mins:02d})"
+    return f"{ZODIAC_NAMES[idx]}({deg:02d}°{mins:02d})"
 
 def get_house_number(lon, cusps, house_system):
     c_list = list(cusps)[1:] if len(cusps) == 13 else list(cusps)
@@ -72,6 +83,7 @@ def calc_midpoint(p1_lon, p2_lon):
     diff = abs(p1_lon - p2_lon)
     return ((p1_lon + p2_lon + 360) / 2.0 if diff > 180 else (p1_lon + p2_lon) / 2.0) % 360
 
+# 【修改】回傳值增加 speed (運行速度) 以判斷逆行
 def calculate_chart_engine(jd, lat, lon, house_system):
     planets_map = {
         '太陽': swe.SUN, '月亮': swe.MOON, '水星': swe.MERCURY, '金星': swe.VENUS, '火星': swe.MARS, 
@@ -79,16 +91,19 @@ def calculate_chart_engine(jd, lat, lon, house_system):
         '冥王星': swe.PLUTO, '北交點': swe.TRUE_NODE
     }
     positions = {}
+    speeds = {}
     for name, planet_id in planets_map.items():
         pos, _ = swe.calc_ut(jd, planet_id)
         positions[name] = pos[0] 
+        speeds[name] = pos[3] # 取得速度
     cusps, ascmc = swe.houses(jd, lat, lon, house_system)
     positions['上升'] = ascmc[0]
     positions['中天'] = ascmc[1]
-    return positions, ascmc[0], cusps, ascmc[1]
+    return positions, ascmc[0], cusps, ascmc[1], speeds
 
+# 【修改】配合引擎更新，補上 _, _, _, _, _
 def get_aspect_modifier_engine(p1, p2, target_angle, current_diff, jd, lat, lon, house_sys):
-    positions_future, _, _, _ = calculate_chart_engine(jd + 0.005, lat, lon, house_sys)
+    positions_future, _, _, _, _ = calculate_chart_engine(jd + 0.005, lat, lon, house_sys)
     if p1 in positions_future and p2 in positions_future:
         f_diff = abs(positions_future[p1] - positions_future[p2])
         if f_diff > 180: f_diff = 360 - f_diff
@@ -164,8 +179,6 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     
     hour_decimal = utc_dt.hour + (utc_dt.minute / 60.0)
     jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, hour_decimal)
-    
-    # 【修改】依要求移除座標顯示 (報告不顯示座標)
     info = f"城市: {location.address}\n時區: {tz_str}\n時間: {local_dt.strftime('%Y-%m-%d %H:%M')}\n"
     return jd, lat, lon, info, utc_dt
 
@@ -179,9 +192,9 @@ name = st.sidebar.text_input("姓名", "Vincent")
 gender = st.sidebar.selectbox("性別", ["男", "女"])
 
 col1, col2, col3 = st.sidebar.columns(3)
-n_year = col1.number_input("年", value=1990, step=1)
-n_month = col2.number_input("月", value=1, min_value=1, max_value=12)
-n_day = col3.number_input("日", value=1, min_value=1, max_value=31)
+n_year = col1.number_input("年", value=1993, step=1)
+n_month = col2.number_input("月", value=9, min_value=1, max_value=12)
+n_day = col3.number_input("日", value=27, min_value=1, max_value=31)
 
 col4, col5 = st.sidebar.columns(2)
 n_hour = col4.number_input("時", value=12, min_value=0, max_value=23)
@@ -222,19 +235,49 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
             jd_n, lat_n, lon_n, meta_n, dt_n_utc = resolve_location_and_time(n_loc, n_year, n_month, n_day, n_hour, n_minute)
             jd_p, lat_p, lon_p, meta_p, dt_p_utc = resolve_location_and_time(p_loc, p_year, p_month, p_day, p_hour, p_minute)
             
-            # 本命盤計算與繪圖
-            pos_n, asc_n, cusps_n, mc_n = calculate_chart_engine(jd_n, lat_n, lon_n, h_code)
+            # 本命盤計算與繪圖 (增加 speed_n)
+            pos_n, asc_n, cusps_n, mc_n, speed_n = calculate_chart_engine(jd_n, lat_n, lon_n, h_code)
             img_n = draw_astrology_chart(pos_n, asc_n, cusps_n, custom_orbs, a_sys_name)
+            
+            # 判斷日夜生 (太陽在 7~12 宮為白天)
+            is_day = 7 <= get_house_number(pos_n['太陽'], cusps_n, h_code) <= 12
             
             # ================= 綜合觀測報告文字組合 =================
             report = f"== 命盤基本觀測 ==\n持有人：{name} ({gender})\n{meta_n}\n"
-            # 【修改】標題由【星體與交點位置】改為【星體位置】
+            
+            # 【修改】星體位置加上：廟旺陷弱、得失時、逆行
             report += "【星體位置】\n"
             for k in ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '北交點', '上升', '中天']:
-                report += f"{k}：{format_degree(pos_n[k])} {get_house_number(pos_n[k], cusps_n, h_code)}宮\n"
+                h_num = get_house_number(pos_n[k], cusps_n, h_code)
+                base_str = f"{k: <3}：{format_degree(pos_n[k])} {h_num: >2}宮"
+                
+                status_parts = []
+                
+                # 1. 廟旺陷弱 (只看七大古典星)
+                if k in DIGNITIES:
+                    sign_idx = int(pos_n[k] // 30) % 12
+                    dig_str = ""
+                    if sign_idx in DIGNITIES[k]['廟']: dig_str += "廟"
+                    if sign_idx in DIGNITIES[k]['旺']: dig_str += "旺"
+                    if sign_idx in DIGNITIES[k]['弱']: dig_str += "弱"
+                    if sign_idx in DIGNITIES[k]['陷']: dig_str += "陷"
+                    if dig_str: status_parts.append(dig_str)
+                
+                # 2. 得時/失時
+                if is_day and k in ['太陽', '木星', '土星']: status_parts.append("得時")
+                elif not is_day and k in ['月亮', '金星', '火星']: status_parts.append("得時")
+                
+                # 3. 逆行 (排除日月、虛點，速度小於 0 即逆行)
+                if k in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
+                    if speed_n.get(k, 0) < 0:
+                        status_parts.append("逆行")
+                
+                if status_parts:
+                    report += f"{base_str}    {'   '.join(status_parts)}\n"
+                else:
+                    report += f"{base_str}\n"
 
             if chk_greek:
-                is_day = 7 <= get_house_number(pos_n['太陽'], cusps_n, h_code) <= 12
                 sun, moon, mars, jup, sat = pos_n['太陽'], pos_n['月亮'], pos_n['火星'], pos_n['木星'], pos_n['土星']
                 fortune = (asc_n + moon - sun) if is_day else (asc_n + sun - moon)
                 spirit = (asc_n + sun - moon) if is_day else (asc_n + moon - sun)
@@ -310,7 +353,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     ages = [str(age) for age in range(76) if age % 12 == h]
                     report += f"{h+1}宮-{ruler}：{ '、'.join(ages) }\n"
 
-            # 【修改】日弧相位邏輯重構：更名為【日弧相位】、過濾和諧相、計算 +/- 入出相位
             if chk_solar_arc:
                 report += "\n\n【日弧相位】\n"
                 age_in_years = (dt_p_utc - dt_n_utc).days / 365.242199
@@ -319,7 +361,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 solar_arc = (pos_prog[0] - pos_n['太陽']) % 360
                 
                 sa_lines = []
-                # 僅定義 0, 45, 90, 135, 180 度相位
                 sa_specs = [(0, "合相"), (45, "半四分"), (90, "四分"), (135, "補八分"), (180, "對相")]
                 
                 for p1 in ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
@@ -329,20 +370,18 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                         if diff > 180: diff = 360 - diff
                         
                         for angle, a_name in sa_specs:
-                            if abs(diff - angle) <= 1.0: # 1度容許度
-                                # 微調未來時間以判斷入出相 (+ / -)
+                            if abs(diff - angle) <= 1.0: 
                                 sa_lon_future = (sa_lon + 0.005) % 360
                                 diff_future = abs(sa_lon_future - pos_n[p2])
                                 if diff_future > 180: diff_future = 360 - diff_future
-                                
                                 sa_sign = "+" if abs(diff_future - angle) < abs(diff - angle) else "-"
                                 sa_lines.append(f"[弧]{p1} - [命]{p2} {a_name} {sa_sign}{abs(diff - angle):.2f}°")
                                 break
                 report += "\n".join(sa_lines) if sa_lines else "無符合規格之日弧相位"
 
             if chk_transit:
-                pos_t, _, _, _ = calculate_chart_engine(jd_p, lat_p, lon_p, h_code)
-                pos_t_future, _, _, _ = calculate_chart_engine(jd_p + 0.005, lat_p, lon_p, h_code)
+                pos_t, _, _, _, _ = calculate_chart_engine(jd_p, lat_p, lon_p, h_code)
+                pos_t_future, _, _, _, _ = calculate_chart_engine(jd_p + 0.005, lat_p, lon_p, h_code)
                 
                 report += f"\n\n【行運觀測資訊】\n目標城市：{p_loc}\n"
                 for k in ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
@@ -364,7 +403,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                                 t_lines.append(f"[運]{p1} {a_name} [命]{p2} {t_sign} {abs(diff - angle):.1f}°")
                 report += "\n".join(t_lines) if t_lines else "無符合交叉行運相位"
 
-            # 【修改】日返盤與日返相位列表計算
             img_sr = None
             if chk_solar_return:
                 jd_approx = swe.julday(p_year, dt_n_utc.month, dt_n_utc.day, 12.0)
@@ -378,7 +416,7 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     f2 = sun_diff(j2)
                 
                 jd_sr = j2
-                pos_sr, asc_sr, cusps_sr, mc_sr = calculate_chart_engine(jd_sr, lat_p, lon_p, h_code)
+                pos_sr, asc_sr, cusps_sr, mc_sr, _ = calculate_chart_engine(jd_sr, lat_p, lon_p, h_code)
                 img_sr = draw_astrology_chart(pos_sr, asc_sr, cusps_sr, custom_orbs, a_sys_name)
                 
                 tf = TimezoneFinder()
@@ -386,12 +424,10 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 sr_utc_dt = datetime.datetime(2000, 1, 1, 12, 0, tzinfo=pytz.utc) + datetime.timedelta(days=jd_sr - 2451545.0)
                 sr_local_dt = sr_utc_dt.astimezone(pytz.timezone(tz_str))
                 
-                # 【修改】更名為【日返報告】
                 report += f"\n\n【日返報告】\n返照精確時間：{sr_local_dt.strftime('%Y-%m-%d %H:%M:%S')} ({tz_str})\n"
                 for k in ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '上升', '中天']:
                     report += f"日返{k}：{format_degree(pos_sr[k])} {get_house_number(pos_sr[k], cusps_sr, h_code)}宮\n"
                 
-                # 【新增】日返星盤的獨立相位列表與入出相計算
                 report += "\n【日返相位列表】\n"
                 sr_aspect_lines = []
                 p_names_sr = [p for p in pos_sr.keys() if p in PLANET_SYMBOLS]
