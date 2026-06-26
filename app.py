@@ -15,7 +15,7 @@ if st.button("測試計算"):
         st.error(f"錯誤: {e}")
 
 # ==================== 【重要修改】使用 kerykeion ====================
-from kerykeion import KrInstance, make_svg_chart   # 新增
+from kerykeion import KrInstance   # 新增
 
 # ================= 1. 基礎設定與常數 =================
 plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'SimHei', 'DejaVu Sans'] 
