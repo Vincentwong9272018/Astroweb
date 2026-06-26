@@ -1,6 +1,16 @@
 import streamlit as st
 import datetime
 from kerykeion import KrInstance
+import matplotlib.pyplot as plt  # 👈 補上這一行！
+import numpy as np               # 👈 順便檢查有沒有這一行，因為你後面繪圖有用到 np.deg2rad
+import os
+import io
+import numpy as np
+import swisseph as swe
+from geopy.geocoders import Nominatim
+from timezonefinder import TimezoneFinder
+import pytz
+
 
 st.set_page_config(page_title="星盤測試", layout="wide")
 st.title("🔮 星盤測試")
