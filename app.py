@@ -160,6 +160,8 @@ def draw_astrology_chart(positions, asc_degree, cusps, orb_map, aspect_system):
 def resolve_location_and_time(loc_name, y, m, d, h, minute):
     if not loc_name: 
         raise ValueError("城市名稱不能為空！")
+        
+    # 這裡應該已經是你剛換好的 ArcGIS 了
     location = ArcGIS(timeout=10).geocode(loc_name)
     if not location: 
         raise ValueError(f"無法定位城市: '{loc_name}'")
@@ -169,8 +171,15 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     local_dt = pytz.timezone(tz_str).localize(datetime.datetime(y, m, d, h, minute))
     utc_dt = local_dt.astimezone(pytz.utc)
     
+    # ======== 新增：計算 JD (儒略日) ========
+    hour_decimal = utc_dt.hour + (utc_dt.minute / 60.0)
+    jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, hour_decimal)
+    # =========================================
+    
     info = f"城市: {location.address}\n座標: {lat:.4f}°N, {lon:.4f}°E\n時區: {tz_str}\n時間: {local_dt.strftime('%Y-%m-%d %H:%M')}\n"
-    return utc_dt, lat, lon, info
+    
+    # 修改：回傳 5 個值，順序為 jd, lat, lon, info, utc_dt
+    return jd, lat, lon, info, utc_dt
 
 def calculate_chart_kerykeion(utc_dt, lat, lon, name="Native"):
     """使用 kerykeion 計算星盤"""
