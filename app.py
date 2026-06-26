@@ -7,7 +7,7 @@ st.title("🔮 星盤測試")
 
 if st.button("測試計算"):
     try:
-        chart = KrInstance("Test", 1993, 9, 27, 12, 0, 53.48, -2.24)  # Manchester
+        chart = KrInstance("Test", 1993, 9, 27, 12, 0, lat=53.48, lng=-2.24)  # Manchester
         chart.make_chart()
         st.success("✅ kerykeion 安裝成功！")
         st.json(chart.get_all())
