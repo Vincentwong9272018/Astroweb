@@ -245,7 +245,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     return jd, lat, lon, info, utc_dt
 
 # ================= 3. Streamlit UI 介面 =================
-st.title("🔮 進階專業星盤推運系統")
+st.title("🔮 Mr Vincent星盤系統")
 
 # --- 側邊欄：本命盤設定 ---
 st.sidebar.header("本命盤基本資訊")
