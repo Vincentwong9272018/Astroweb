@@ -69,7 +69,7 @@ TRADITIONAL_RULERS = {
 }
 
 LILLY_MOITIES = {
-    '太陽': 7.5, '月亮': 6.0, '土星': 4.5, '木星': 4.5, '火星': 4.0, '金星': 3.5, '水星': 3.5,
+    '太陽': 7.5, '月亮': 6.0, '土星': 4.5, '木音樂': 4.5, '火星': 4.0, '金星': 3.5, '水星': 3.5,
     '天王星': 2.5, '海王星': 2.5, '冥王星': 2.5, '北交點': 2.5, '上升': 0.0, '中天': 0.0
 }
 
@@ -168,6 +168,7 @@ def calc_zodiacal_releasing(lot_lon, birth_jd, target_jd):
         else: break
     return l1_sign, l2_sign, is_lb
 
+# ================= 3. 繪圖模組 (深度視覺升級版) =================
 def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, speeds=None):
     aspects = []
     p_names = [p for p in positions.keys() if p in PLANET_SYMBOLS]
@@ -184,65 +185,93 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, spe
                     break
 
     fig, ax = plt.subplots(figsize=(7, 7), subplot_kw={'projection': 'polar'})
-    ax.set_theta_zero_location("W"); ax.set_theta_direction(-1)      
+    ax.set_theta_zero_location("W")
+    ax.set_theta_direction(-1)      
     def get_canvas_angle(zodiac_degree): return np.deg2rad(asc_degree - zodiac_degree)
     ax.axis('off')
+    
+    # 畫出核心的三個圈圈
     ax.add_artist(plt.Circle((0, 0), 1.0, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.82, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.45, transform=ax.transData._b, fill=False, color='#ccc', lw=0.8))
 
+    # 繪製 12 星座外圈與標籤
     for i in range(12):
         angle = get_canvas_angle(i * 30)
         ax.plot([angle, angle], [0.82, 1.0], color='#888', lw=0.8)
         ax.text(get_canvas_angle(i * 30 + 15), 0.91, ZODIAC_SYMBOLS[i], fontsize=16, ha='center', va='center')
 
+    # 繪製宮位線
     c_list = list(cusps)[1:] if len(cusps) == 13 else list(cusps)
     for i, deg in enumerate(c_list):
         ax.plot([get_canvas_angle(deg)]*2, [0.45, 0.82], color='red' if i == 0 else ('blue' if i == 9 else '#666'), lw=1.5 if i in [0,9] else 0.7)
 
+    # 繪製內部相位連線
     for p1, p2, color in aspects:
         ax.plot([get_canvas_angle(positions[p1]), get_canvas_angle(positions[p2])], [0.45, 0.45], color=color, lw=1.2, alpha=0.3)
 
-    # 1. 完美防重疊機制 (Anti-Collision)
+    # 星體位置優化：2D 防重疊演算（同時修正半徑與微調角度，防止多星塞在同度數排成死直線）
     sorted_planets = sorted([(p, deg) for p, deg in positions.items() if p in PLANET_SYMBOLS], key=lambda x: x[1])
-    allocated_radii = {}
-    occupied = []
-    for p, deg in sorted_planets:
-        r_level = 0.70
+    
+    render_coords = {} # 用於存放最終計算出來的繪圖半徑與角度
+    occupied_slots = [] # 記錄已被佔用的空間
+    
+    for p, original_deg in sorted_planets:
+        r_level = 0.72  # 初始最外層半徑
+        adjusted_deg = original_deg
+        
+        # 進行網格狀碰撞檢測
         while True:
-            collision = False
-            for occ_deg, occ_r in occupied:
-                diff = abs((deg - occ_deg + 180) % 360 - 180)
-                if diff < 7.0 and abs(occ_r - r_level) < 0.01:
-                    collision = True
+            conflict = False
+            for occ_deg, occ_r in occupied_slots:
+                # 換算角度差
+                ang_diff = abs((adjusted_deg - occ_deg + 180) % 360 - 180)
+                # 如果在同一個高度層級，且角度太過靠近（小於7度）
+                if ang_diff < 7.0 and abs(occ_r - r_level) < 0.01:
+                    conflict = True
                     break
-            if collision:
-                r_level -= 0.085  # 如果重疊，向內圈推移
+            
+            if conflict:
+                # 發生碰撞：主要往內圈推移半徑，並附帶進行極微小的角度推擠來增加錯開層 sound
+                r_level -= 0.082
+                adjusted_deg += 1.5 # 微調 1.5 度，避免星體符號上下完全重合死板
             else:
                 break
-        allocated_radii[p] = r_level
-        occupied.append((deg, r_level))
+                
+        render_coords[p] = (r_level, adjusted_deg)
+        occupied_slots.append((adjusted_dt:=adjusted_deg, r_level))
 
-    for planet, deg in positions.items():
+    # 開始繪製星體與「絕對指向線」
+    for planet, original_deg in positions.items():
         if planet not in PLANET_SYMBOLS: continue
-        angle = get_canvas_angle(deg); sym = PLANET_SYMBOLS[planet]; r = allocated_radii[planet]
         
-        # 2. 定位指示虛線：從星體「上方」畫到黃道內緣 (0.82)
-        ax.plot([angle, angle], [r + 0.05, 0.82], color=sym['color'], lw=0.8, alpha=0.6, linestyle=':')
+        # 取得這顆星體被修正過後的繪圖半徑與角度
+        r, draw_deg = render_coords[planet]
+        
+        actual_angle = get_canvas_angle(original_deg) # 內圈真正的黃道經度弧度
+        draw_angle = get_canvas_angle(draw_deg)       # 圖示實際渲染位置的弧度
+        sym = PLANET_SYMBOLS[planet]
+        
+        # ⭐ 核心功能一：精確定位指示線
+        # 虛線起點：星體符號外側（r + 0.045），終點：內圈圓周（0.82）
+        # 指示線從星體上方出發連接到內圈邊界，完全不干涉星體下方的度數文字，永不遮擋！
+        ax.plot([draw_angle, actual_angle], [r + 0.045, 0.82], color=sym['color'], lw=0.9, alpha=0.7, linestyle=':')
         
         f_size = 11 if planet in ['上升', '中天'] else 18
         f_weight = 'bold' if planet in ['上升', '中天'] else 'normal'
         
-        # 繪製星體符號
-        ax.text(angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
+        # 繪製星體主要符號 (不重疊)
+        ax.text(draw_angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
         
-        # 繪制度數文字 (位於星體下方，不被指示線遮擋)
-        ax.text(angle, r - 0.08, f"{int(deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
+        # 繪制度數文字 (恆置於符號下方，確保乾淨不被線段劃過)
+        ax.text(draw_angle, r - 0.042, f"{int(original_deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
         
-        # 3. 逆行標記 (Retrograde 'R')：放置於星體左下角
+        # ⭐ 核心功能二：完美位置連動的逆行細小 'R' 標記
+        # 改用動態極座標偏移計算，不使用固定像素，保證不論半徑如何變動，R 永遠精確貼在星體左下角 
         if speeds and speeds.get(planet, 0) < 0 and planet in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
-            ax.annotate('R', xy=(angle, r), xytext=(-12, -10), textcoords='offset points', 
-                        color='#c0392b', fontsize=8, fontweight='bold', ha='center', va='center')
+            r_r = r - 0.015
+            angle_r = draw_angle - 0.06  # 往左下方偏移弧度
+            ax.text(angle_r, r_r, 'R', color='#c0392b', fontsize=7.5, fontweight='bold', ha='center', va='center')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=145)
@@ -266,10 +295,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     info = f"城市: {location.address}\n時區: {tz_str}\n時間: {local_dt.strftime('%Y-%m-%d %H:%M')}\n"
     return jd, lat, lon, info, utc_dt
 
-# ================= 3. Streamlit UI 介面 =================
-st.title("🔮 進階專業星盤推運系統")
-
-# --- 側邊欄：本命盤設定 ---
+# ================= 4. Streamlit UI 介面 =================
 st.sidebar.header("本命盤基本資訊")
 name = st.sidebar.text_input("姓名", key="name_input")
 gender = st.sidebar.selectbox("性別", ["男", "女"])
@@ -290,7 +316,6 @@ btn_col2.button("📍 當下地點", on_click=set_current_loc, use_container_wid
 
 st.sidebar.divider()
 
-# --- 側邊欄：推運設定 (收納) ---
 with st.sidebar.expander("推運 / 行運 / 日返設定", expanded=False):
     st.number_input("推運 年", key="p_year", step=1, on_change=update_age_from_year)
     col6, col7 = st.columns(2)
@@ -307,7 +332,6 @@ with st.sidebar.expander("推運 / 行運 / 日返設定", expanded=False):
 
 h_sys_name = st.sidebar.selectbox("宮位系統", ["普拉西度 (Placidus)", "整宮制 (Whole Sign)", "Regiomontanus"])
 
-# --- 側邊欄：自訂相位 ---
 a_sys_name = st.sidebar.selectbox("相位系統", ["現代", "古典 (威廉・里利)", "自訂"])
 custom_orbs = {}
 if a_sys_name == "自訂":
@@ -348,7 +372,6 @@ aspect_specs_full = [
     (180, "對相", '#2980b9', custom_orbs.get(180, 0))
 ]
 
-# --- 主計算按鈕 ---
 if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, type="primary"):
     try:
         with st.spinner('天文運算與分析報告生成中...'):
@@ -361,7 +384,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 st.session_state.p_loc, st.session_state.p_year, st.session_state.p_month, 
                 st.session_state.p_day, st.session_state.p_hour, st.session_state.p_minute)
             
-            # 【注意】現在呼叫畫圖引擎有傳入 speed_n 作為最後一個參數了！
             pos_n, asc_n, cusps_n, mc_n, speed_n = calculate_chart_engine(jd_n, lat_n, lon_n, h_code)
             img_n = draw_astrology_chart(pos_n, asc_n, cusps_n, aspect_specs_full, a_sys_name, speeds=speed_n)
             
