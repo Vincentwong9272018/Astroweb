@@ -17,9 +17,9 @@ st.set_page_config(page_title="專業星盤系統", layout="wide")
 now = datetime.datetime.now()
 if 'n_year' not in st.session_state:
     st.session_state.update({
-        'n_year': 1990, 'n_month': 1, 'n_day': 1, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
+        'n_year': 1993, 'n_month': 9, 'n_day': 27, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
         'p_year': now.year, 'p_month': now.month, 'p_day': now.day, 'p_hour': now.hour, 'p_minute': now.minute, 'p_loc': "Manchester",
-        'target_age': now.year - 1990
+        'target_age': now.year - 1993
     })
 
 def set_current_time():
@@ -59,7 +59,6 @@ PLANET_SYMBOLS = {
     '上升': {'sym': 'ASC', 'color': '#c0392b'}, '中天': {'sym': 'MC', 'color': '#2980b9'}
 }
 
-# 定義統一行星列表，確保所有進階功能都有這 13 個點
 ALL_POINTS = ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '北交點', '上升', '中天']
 TRANSIT_POINTS = ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '北交點']
 
@@ -169,7 +168,7 @@ def calc_zodiacal_releasing(lot_lon, birth_jd, target_jd):
         else: break
     return l1_sign, l2_sign, is_lb
 
-def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system):
+def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, speeds=None):
     aspects = []
     p_names = [p for p in positions.keys() if p in PLANET_SYMBOLS]
     for i in range(len(p_names)):
@@ -204,20 +203,46 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system):
     for p1, p2, color in aspects:
         ax.plot([get_canvas_angle(positions[p1]), get_canvas_angle(positions[p2])], [0.45, 0.45], color=color, lw=1.2, alpha=0.3)
 
+    # 1. 完美防重疊機制 (Anti-Collision)
     sorted_planets = sorted([(p, deg) for p, deg in positions.items() if p in PLANET_SYMBOLS], key=lambda x: x[1])
     allocated_radii = {}
-    for i, (p, deg) in enumerate(sorted_planets):
+    occupied = []
+    for p, deg in sorted_planets:
         r_level = 0.70
-        for j in range(max(0, i-4), i):
-            if abs((deg - sorted_planets[j][1] + 180) % 360 - 180) < 6.5 and allocated_radii.get(sorted_planets[j][0], 0.70) == r_level:
-                r_level -= 0.06
+        while True:
+            collision = False
+            for occ_deg, occ_r in occupied:
+                diff = abs((deg - occ_deg + 180) % 360 - 180)
+                if diff < 7.0 and abs(occ_r - r_level) < 0.01:
+                    collision = True
+                    break
+            if collision:
+                r_level -= 0.085  # 如果重疊，向內圈推移
+            else:
+                break
         allocated_radii[p] = r_level
+        occupied.append((deg, r_level))
 
     for planet, deg in positions.items():
         if planet not in PLANET_SYMBOLS: continue
         angle = get_canvas_angle(deg); sym = PLANET_SYMBOLS[planet]; r = allocated_radii[planet]
-        ax.text(angle, r, sym['sym'], fontsize=11 if planet in ['上升', '中天'] else 18, ha='center', va='center', color=sym['color'], fontweight='bold' if planet in ['上升', '中天'] else 'normal')
-        ax.text(angle, r - 0.09, f"{int(deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
+        
+        # 2. 定位指示虛線：從星體「上方」畫到黃道內緣 (0.82)
+        ax.plot([angle, angle], [r + 0.05, 0.82], color=sym['color'], lw=0.8, alpha=0.6, linestyle=':')
+        
+        f_size = 11 if planet in ['上升', '中天'] else 18
+        f_weight = 'bold' if planet in ['上升', '中天'] else 'normal'
+        
+        # 繪製星體符號
+        ax.text(angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
+        
+        # 繪制度數文字 (位於星體下方，不被指示線遮擋)
+        ax.text(angle, r - 0.08, f"{int(deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
+        
+        # 3. 逆行標記 (Retrograde 'R')：放置於星體左下角
+        if speeds and speeds.get(planet, 0) < 0 and planet in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
+            ax.annotate('R', xy=(angle, r), xytext=(-12, -10), textcoords='offset points', 
+                        color='#c0392b', fontsize=8, fontweight='bold', ha='center', va='center')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=145)
@@ -242,7 +267,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     return jd, lat, lon, info, utc_dt
 
 # ================= 3. Streamlit UI 介面 =================
-st.title("🔮 Mr Vincent星盤系統")
+st.title("🔮 進階專業星盤推運系統")
 
 # --- 側邊欄：本命盤設定 ---
 st.sidebar.header("本命盤基本資訊")
@@ -336,8 +361,9 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 st.session_state.p_loc, st.session_state.p_year, st.session_state.p_month, 
                 st.session_state.p_day, st.session_state.p_hour, st.session_state.p_minute)
             
+            # 【注意】現在呼叫畫圖引擎有傳入 speed_n 作為最後一個參數了！
             pos_n, asc_n, cusps_n, mc_n, speed_n = calculate_chart_engine(jd_n, lat_n, lon_n, h_code)
-            img_n = draw_astrology_chart(pos_n, asc_n, cusps_n, aspect_specs_full, a_sys_name)
+            img_n = draw_astrology_chart(pos_n, asc_n, cusps_n, aspect_specs_full, a_sys_name, speeds=speed_n)
             
             is_day = 7 <= get_house_number(pos_n['太陽'], cusps_n, h_code) <= 12
             
@@ -534,8 +560,8 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     f2 = sun_diff(j2)
                 
                 jd_sr = j2
-                pos_sr, asc_sr, cusps_sr, mc_sr, _ = calculate_chart_engine(jd_sr, lat_p, lon_p, h_code)
-                img_sr = draw_astrology_chart(pos_sr, asc_sr, cusps_sr, aspect_specs_full, a_sys_name)
+                pos_sr, asc_sr, cusps_sr, mc_sr, speed_sr = calculate_chart_engine(jd_sr, lat_p, lon_p, h_code)
+                img_sr = draw_astrology_chart(pos_sr, asc_sr, cusps_sr, aspect_specs_full, a_sys_name, speeds=speed_sr)
                 
                 tf = TimezoneFinder()
                 tz_str = tf.timezone_at(lng=lon_p, lat=lat_p) or "UTC"
