@@ -475,7 +475,7 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     if sign_idx in DIGNITIES[k]['陷']: dig_str += "陷"
                     if dig_str: status_parts.append(dig_str)
                 if is_day and k in ['太陽', '木星', '土星']: status_parts.append("得時")
-                elif not is_day smash and k in ['月亮', '金星', '火星']: status_parts.append("得時")
+                elif not is_day and k in ['月亮', '金星', '火星']: status_parts.append("得時")
                 if k in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
                     if speed_n.get(k, 0) < 0: status_parts.append("逆行")
                 
