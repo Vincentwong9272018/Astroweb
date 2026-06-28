@@ -10,6 +10,7 @@ from geopy.geocoders import ArcGIS
 from timezonefinder import TimezoneFinder
 import pytz
 import requests 
+import itertools # 新增：用於格局排列組合運算
 
 st.set_page_config(page_title="專業星盤系統", layout="wide")
 
@@ -17,9 +18,9 @@ st.set_page_config(page_title="專業星盤系統", layout="wide")
 now = datetime.datetime.now()
 if 'n_year' not in st.session_state:
     st.session_state.update({
-        'n_year': 1990, 'n_month': 1, 'n_day': 1, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
+        'n_year': 1993, 'n_month': 9, 'n_day': 27, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
         'p_year': now.year, 'p_month': now.month, 'p_day': now.day, 'p_hour': now.hour, 'p_minute': now.minute, 'p_loc': "Manchester",
-        'target_age': now.year - 1990
+        'target_age': now.year - 1993
     })
 
 def set_current_time():
@@ -49,6 +50,10 @@ ZODIAC_SYMBOLS = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐',
 ZODIAC_NAMES = ['牡羊', '金牛', '雙子', '巨蟹', '獅子', '處女', '天秤', '天蠍', '射手', '摩羯', '水瓶', '雙魚']
 ZR_PERIODS = [15, 8, 20, 25, 19, 20, 8, 15, 12, 27, 30, 12] 
 
+# 十二星座與四元素、四正星座（三形態）對應關係 (星座索引0~11)
+ZODIAC_ELEMENTS = ['火', '土', '風', '水', '火', '土', '風', '水', '火', '土', '風', '水']
+ZODIAC_MODES = ['開創', '固定', '變動', '開創', '固定', '變動', '開創', '固定', '變動', '開創', '固定', '變動']
+
 PLANET_SYMBOLS = {
     '太陽': {'sym': '☉', 'color': '#e67e22'}, '月亮': {'sym': '☽', 'color': '#7f8c8d'},
     '水星': {'sym': '☿', 'color': '#27ae60'}, '金星': {'sym': '♀', 'color': '#2ecc71'},
@@ -60,6 +65,7 @@ PLANET_SYMBOLS = {
 }
 
 ALL_POINTS = ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '北交點', '上升', '中天']
+WEIGHT_POINTS = ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '上升', '中天']
 TRANSIT_POINTS = ['太陽', '月亮', '水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星', '北交點']
 
 TRADITIONAL_RULERS = {
@@ -83,7 +89,7 @@ DIGNITIES = {
     '土星': {'廟': [9, 10], '旺': [6], '弱': [3, 4], '陷': [0]}
 }
 
-# ================= 2. 核心函數 =================
+# ================= 2. 核心占星算法與格局引擎 =================
 EPHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ephe')
 swe.set_ephe_path(EPHE_PATH)
 
@@ -168,6 +174,70 @@ def calc_zodiacal_releasing(lot_lon, birth_jd, target_jd):
         else: break
     return l1_sign, l2_sign, is_lb
 
+# 【新增】高效特殊星體格局檢索分析引擎
+def find_astrology_patterns(positions):
+    patterns = {"大三角": [], "大十字": [], "T三角": [], "風箏": [], "上帝之指": []}
+    pts = [p for p in ALL_POINTS if p in positions]
+    
+    # 建立快捷相差判定內建子函數 (格局判定統一使用較嚴格的標準客製化容許度)
+    def is_asp(p1, p2, target, orb=6.0):
+        d = abs(positions[p1] - positions[p2])
+        if d > 180: d = 360 - d
+        return abs(d - target) <= orb
+
+    # 1. 大三角 & T三角 & 上帝之指 (三星格局)
+    for triple in itertools.combinations(pts, 3):
+        # 排除同星座限制
+        signs = [int(positions[p] // 30) for p in triple]
+        if len(set(signs)) < 3: continue
+        
+        p1, p2, p3 = triple
+        # 大三角：任意兩兩 120° 且同元素
+        if is_asp(p1, p2, 120) and is_asp(p2, p3, 120) and is_asp(p1, p3, 120):
+            el1, el2, el3 = ZODIAC_ELEMENTS[signs[0]], ZODIAC_ELEMENTS[signs[1]], ZODIAC_ELEMENTS[signs[2]]
+            if el1 == el2 == el3:
+                patterns["大三角"].append(f"{el1}元素大三角：{p1} - {p2} - {p3}")
+                
+        # T三角：兩星衝(180)，第三星(Apex)同時刑(90)此兩星
+        for a, b, c in itertools.permutations(triple):
+            if is_asp(a, b, 180) and is_asp(c, a, 90) and is_asp(c, b, 90):
+                mode = ZODIAC_MODES[signs[pts.index(c)]]
+                # 確保不重複加入
+                txt = f"{p1} - {p2} - {p3} (頂點: {c})"
+                if txt not in patterns["T三角"]: patterns["T三角"].append(txt)
+                
+        # 上帝之指 Yod：底部兩星六分相(60°)，兩星同時補十二分相(150°)射向 Apex 頂點
+        for a, b, c in itertools.permutations(triple):
+            if is_asp(a, b, 60) and is_asp(c, a, 150, orb=3.0) and is_asp(c, b, 150, orb=3.0):
+                txt = f"{a} - {b} - {c} (頂點: {c})"
+                if txt not in patterns["上帝之指"]: patterns["上帝之指"].append(txt)
+
+    # 2. 大十字 & 風箏 (四星格局)
+    for quad in itertools.combinations(pts, 4):
+        signs = [int(positions[p] // 30) for p in quad]
+        if len(set(signs)) < 4: continue
+        p1, p2, p3, p4 = quad
+        
+        # 大十字：各自兩組180，且四星不同星座同特質，兩兩90垂直
+        for a, b, c, d in itertools.permutations(quad):
+            if is_asp(a, b, 180) and is_asp(c, d, 180):
+                if is_asp(a, c, 90) and is_asp(a, d, 90) and is_asp(b, c, 90) and is_asp(b, d, 90):
+                    m1, m2, m3, m4 = ZODIAC_MODES[signs[0]], ZODIAC_MODES[signs[1]], ZODIAC_MODES[signs[2]], ZODIAC_MODES[signs[4] if len(signs)>4 else signs[3]]
+                    if m1 == m2 == m3 == m4:
+                        txt = f"{a} - {c} - {b} - {d}"
+                        if txt not in patterns["大十字"]: patterns["大十字"].append(txt)
+                        
+        # 風箏 Kite：三星組成大三角，第四星與其中一星對衝(180)，並跟另外兩星形成六分相(60)
+        for a, b, c, d in itertools.permutations(quad):
+            # 假設 a, b, c 形成大三角
+            if is_asp(a, b, 120) and is_asp(b, c, 120) and is_asp(a, c, 120):
+                # 第四星 d 與 a 對衝，並六分相投射射向 b, c
+                if is_asp(d, a, 180) and is_asp(d, b, 60) and is_asp(d, c, 60):
+                    txt = f"{a} - {b} - {c} - {d} (風箏頂點: {d})"
+                    if txt not in patterns["風箏"]: patterns["風箏"].append(txt)
+                    
+    return patterns
+
 def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, speeds=None):
     aspects = []
     p_names = [p for p in positions.keys() if p in PLANET_SYMBOLS]
@@ -188,7 +258,6 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, spe
     def get_canvas_angle(zodiac_degree): return np.deg2rad(asc_degree - zodiac_degree)
     ax.axis('off')
     
-    # 畫出核心的三個圈圈
     ax.add_artist(plt.Circle((0, 0), 1.0, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.82, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.45, transform=ax.transData._b, fill=False, color='#ccc', lw=0.8))
@@ -202,63 +271,45 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, spe
     for i, deg in enumerate(c_list):
         ax.plot([get_canvas_angle(deg)]*2, [0.45, 0.82], color='red' if i == 0 else ('blue' if i == 9 else '#666'), lw=1.5 if i in [0,9] else 0.7)
 
-    # 繪製內部相位連線 (連至 0.45 內圈)
     for p1, p2, color in aspects:
         ax.plot([get_canvas_angle(positions[p1]), get_canvas_angle(positions[p2])], [0.45, 0.45], color=color, lw=1.2, alpha=0.3)
 
-    # 星體位置優化：完美 2D 防重疊演算
     sorted_planets = sorted([(p, deg) for p, deg in positions.items() if p in PLANET_SYMBOLS], key=lambda x: x[1])
     render_coords = {}
     occupied_slots = []
     
     for p, original_deg in sorted_planets:
-        r_level = 0.76  # 提高初始半徑，留出內部空間給線條
+        r_level = 0.76  
         adjusted_deg = original_deg
-        
         while True:
             conflict = False
             for occ_deg, occ_r in occupied_slots:
                 ang_diff = abs((adjusted_deg - occ_deg + 180) % 360 - 180)
-                # 加大碰撞角度判定為 7 度，確保符號絕不擠在一起
                 if ang_diff < 7.0 and abs(occ_r - r_level) < 0.01:
                     conflict = True
                     break
-            
             if conflict:
-                r_level -= 0.075  # 往內推移
-                adjusted_deg += 1.5   # 角度微調，產生錯位感
+                r_level -= 0.075  
+                adjusted_deg += 1.5   
             else:
                 break
-                
         render_coords[p] = (r_level, adjusted_deg)
         occupied_slots.append((adjusted_deg, r_level))
 
-    # 開始繪製星體與「指向內圈的線」
     for planet, original_deg in positions.items():
         if planet not in PLANET_SYMBOLS: continue
-        
         r, draw_deg = render_coords[planet]
-        
-        actual_angle = get_canvas_angle(original_deg) # 真正的黃道經度
-        draw_angle = get_canvas_angle(draw_deg)       # 圖示實際渲染位置
+        actual_angle = get_canvas_angle(original_deg) 
+        draw_angle = get_canvas_angle(draw_deg)       
         sym = PLANET_SYMBOLS[planet]
         
-        # 1. 畫指向內圈 (0.45 相位圈) 的連接線
-        # 起點是度數文字的下方 (r - 0.065)，終點是實際度數的 0.45 內圈，保證不遮擋文字
         ax.plot([draw_angle, actual_angle], [r - 0.065, 0.45], color=sym['color'], lw=0.9, alpha=0.6, linestyle='-')
-        
         f_size = 11 if planet in ['上升', '中天'] else 18
         f_weight = 'bold' if planet in ['上升', '中天'] else 'normal'
-        
-        # 2. 繪製星體主要符號
         ax.text(draw_angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
-        
-        # 3. 繪制度數文字 (直接在符號正下方)
         ax.text(draw_angle, r - 0.045, f"{int(original_deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
         
-        # 4. 繪製逆行 R 標記 (精確定位在星體左下角，避開度數文字)
         if speeds and speeds.get(planet, 0) < 0 and planet in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
-            # 使用 offset points：x往左 12 像素，y往下 6 像素，完美分離！
             ax.annotate('R', xy=(draw_angle, r), xytext=(-12, -6), textcoords='offset points',
                         color='#c0392b', fontsize=7.5, fontweight='bold', ha='right', va='top')
 
@@ -273,19 +324,17 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     location = ArcGIS(timeout=10).geocode(loc_name)
     if not location: 
         raise ValueError(f"無法定位城市: '{loc_name}'")
-    
     lat, lon = location.latitude, location.longitude
     tz_str = TimezoneFinder().timezone_at(lng=lon, lat=lat) or "UTC"
     local_dt = pytz.timezone(tz_str).localize(datetime.datetime(y, m, d, h, minute))
     utc_dt = local_dt.astimezone(pytz.utc)
-    
     hour_decimal = utc_dt.hour + (utc_dt.minute / 60.0)
     jd = swe.julday(utc_dt.year, utc_dt.month, utc_dt.day, hour_decimal)
     info = f"城市: {location.address}\n時區: {tz_str}\n時間: {local_dt.strftime('%Y-%m-%d %H:%M')}\n"
     return jd, lat, lon, info, utc_dt
 
-# ================= 3. Streamlit UI 介面 =================
-st.title("🔮 Mr vincent星盤系統")
+# ================= 5. Streamlit UI 介面 =================
+st.title("🔮 進階專業星盤推推運系統")
 
 # --- 側邊欄：本命盤設定 ---
 st.sidebar.header("本命盤基本資訊")
@@ -314,12 +363,10 @@ with st.sidebar.expander("推運 / 行運 / 日返設定", expanded=False):
     col6, col7 = st.columns(2)
     col6.number_input("推運 月", key="p_month", min_value=1, max_value=12)
     col7.number_input("推運 日", key="p_day", min_value=1, max_value=31)
-    
     col8, col9 = st.columns(2)
     col8.number_input("推運 時", key="p_hour", min_value=0, max_value=23)
     col9.number_input("推運 分", key="p_minute", min_value=0, max_value=59)
     st.text_input("目標城市", key="p_loc")
-    
     st.divider()
     st.number_input("👉 快速設定推運歲數", key="target_age", min_value=0, max_value=120, on_change=update_year_from_age)
 
@@ -342,6 +389,14 @@ if a_sys_name == "自訂":
         custom_orbs[180] = c3.number_input("180°", value=8, min_value=0, max_value=15)
 else:
     custom_orbs = {0: 8.0, 30: 0, 45: 0, 60: 6.0, 90: 7.0, 120: 7.0, 135: 0, 150: 0, 180: 8.0}
+
+# --- ⭐ 【新增】側邊欄：四元素與四正星座加權分數設定盒 ---
+with st.sidebar.expander("📊 四元素與四正星座權重配分", expanded=False):
+    st.caption("請輸入各星體被賦予的分數 (0~5 分)：")
+    p_weights = {}
+    for p in WEIGHT_POINTS:
+        default_val = 0 if p in ['天王星', '海王星', '冥王星'] else 1
+        p_weights[p] = st.number_input(f"{p} 權重", value=default_val, min_value=0, max_value=5, step=1)
 
 st.sidebar.subheader("進階功能選項")
 chk_greek = st.sidebar.checkbox("七大希臘點")
@@ -384,7 +439,28 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
             
             is_day = 7 <= get_house_number(pos_n['太陽'], cusps_n, h_code) <= 12
             
+            # --- ⭐ 【新增】四元素與四正星座計分邏輯 ---
+            elements_score = {'火': 0, '土': 0, '風': 0, '水': 0}
+            modes_score = {'開創': 0, '固定': 0, '變動': 0}
+            for p in WEIGHT_POINTS:
+                if p in pos_n:
+                    z_idx = int(pos_n[p] // 30) % 12
+                    w = p_weights.get(p, 1)
+                    elements_score[ZODIAC_ELEMENTS[z_idx]] += w
+                    modes_score[ZODIAC_MODES[z_idx]] += w
+            
+            # --- ⭐ 【新增】格局自動掃描 ---
+            detected_patterns = find_astrology_patterns(pos_n)
+
+            # ================= 綜合觀測報告文字組合 =================
             report = f"== 命盤基本觀測 ==\n持有人：{st.session_state.name_input} ({gender})\n{meta_n}\n"
+            
+            # ⭐ 【新增】報告中輸出四元素與四正星座計算
+            report += "【四元素】\n"
+            report += f"火：{elements_score['火']}   土：{elements_score['土']}   風：{elements_score['風']}   水：{elements_score['水']}\n"
+            report += "【四正星座】\n"
+            report += f"開創：{modes_score['開創']}   固定：{modes_score['固定']}   變動：{modes_score['變動']}\n\n"
+
             report += "【星體位置】\n"
             for k in ALL_POINTS:
                 h_num = get_house_number(pos_n[k], cusps_n, h_code)
@@ -399,11 +475,21 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     if sign_idx in DIGNITIES[k]['陷']: dig_str += "陷"
                     if dig_str: status_parts.append(dig_str)
                 if is_day and k in ['太陽', '木星', '土星']: status_parts.append("得時")
-                elif not is_day and k in ['月亮', '金星', '火星']: status_parts.append("得時")
+                elif not is_day smash and k in ['月亮', '金星', '火星']: status_parts.append("得時")
                 if k in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
                     if speed_n.get(k, 0) < 0: status_parts.append("逆行")
                 
                 report += f"{base_str}    {'   '.join(status_parts)}\n" if status_parts else f"{base_str}\n"
+
+            # ⭐ 【新增】報告中輸出大型特殊行星圖形(格局)
+            report += "\n【行星圖形】\n"
+            has_pattern = False
+            for p_title, p_list in detected_patterns.items():
+                for item in p_list:
+                    report += f"{p_title}：{item}\n"
+                    has_pattern = True
+            if not has_pattern:
+                report += "星盤中目前無形成特殊著名行星圖形。\n"
 
             sun, moon, mars, jup, sat = pos_n['太陽'], pos_n['月亮'], pos_n['火星'], pos_n['木星'], pos_n['土星']
             fortune = (asc_n + moon - sun) if is_day else (asc_n + sun - moon)
@@ -522,7 +608,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                         for j in range(i+1, len(ALL_POINTS)):
                             bp1, bp2 = ALL_POINTS[i], ALL_POINTS[j]
                             m_lon = calc_midpoint(pos_n[bp1], pos_n[bp2])
-                            
                             diff = (sa_lon - m_lon) % 360
                             for angle in [0, 45, 90, 135, 180, 225, 270, 315]:
                                 dev = diff - angle
@@ -542,12 +627,10 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
             if chk_transit:
                 pos_t, _, _, _, _ = calculate_chart_engine(jd_p, lat_p, lon_p, h_code)
                 pos_t_future, _, _, _, _ = calculate_chart_engine(jd_p + 0.005, lat_p, lon_p, h_code)
-                
                 report += f"\n\n【行運觀測資訊】\n目標城市：{st.session_state.p_loc}\n"
                 for k in TRANSIT_POINTS:
                     h_num = get_house_number(pos_t[k], cusps_n, h_code)
                     report += f"[運]{k} ：{format_degree(pos_t[k])} [命] {h_num}宮\n"
-                
                 report += "\n【行運星與本命星相位】\n"
                 t_lines = []
                 for p1 in TRANSIT_POINTS:
@@ -575,11 +658,9 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     j_next = j2 - f2 * (j2 - j1) / (f2 - f1)
                     j1, j2, f1 = j2, j_next, f2
                     f2 = sun_diff(j2)
-                
                 jd_sr = j2
                 pos_sr, asc_sr, cusps_sr, mc_sr, speed_sr = calculate_chart_engine(jd_sr, lat_p, lon_p, h_code)
                 img_sr = draw_astrology_chart(pos_sr, asc_sr, cusps_sr, aspect_specs_full, a_sys_name, speeds=speed_sr)
-                
                 tf = TimezoneFinder()
                 tz_str = tf.timezone_at(lng=lon_p, lat=lat_p) or "UTC"
                 sr_utc_dt = datetime.datetime(2000, 1, 1, 12, 0, tzinfo=pytz.utc) + datetime.timedelta(days=jd_sr - 2451545.0)
@@ -608,16 +689,13 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
 
             # ================= UI 佈局顯示 =================
             col_main1, col_main2 = st.columns([1, 1])
-            
             with col_main1:
                 st.subheader("圖表視覺化")
                 tab1, tab2 = st.tabs(["本命星盤", "日返星盤"])
-                with tab1:
-                    st.image(img_n, use_container_width=True)
+                with tab1: st.image(img_n, use_container_width=True)
                 with tab2:
                     if img_sr: st.image(img_sr, use_container_width=True)
                     else: st.info("請於左側勾選「計算日返星盤」以生成。")
-                    
             with col_main2:
                 st.subheader("綜合觀測報告")
                 st.code(report, language="text") 
