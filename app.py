@@ -187,6 +187,8 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, spe
     ax.set_theta_zero_location("W"); ax.set_theta_direction(-1)      
     def get_canvas_angle(zodiac_degree): return np.deg2rad(asc_degree - zodiac_degree)
     ax.axis('off')
+    
+    # 畫出核心的三個圈圈
     ax.add_artist(plt.Circle((0, 0), 1.0, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.82, transform=ax.transData._b, fill=False, color='#333', lw=1.2))
     ax.add_artist(plt.Circle((0, 0), 0.45, transform=ax.transData._b, fill=False, color='#ccc', lw=0.8))
@@ -200,49 +202,65 @@ def draw_astrology_chart(positions, asc_degree, cusps, specs, aspect_system, spe
     for i, deg in enumerate(c_list):
         ax.plot([get_canvas_angle(deg)]*2, [0.45, 0.82], color='red' if i == 0 else ('blue' if i == 9 else '#666'), lw=1.5 if i in [0,9] else 0.7)
 
+    # 繪製內部相位連線 (連至 0.45 內圈)
     for p1, p2, color in aspects:
         ax.plot([get_canvas_angle(positions[p1]), get_canvas_angle(positions[p2])], [0.45, 0.45], color=color, lw=1.2, alpha=0.3)
 
-    # 1. 完美防重疊機制 (Anti-Collision)
+    # 星體位置優化：完美 2D 防重疊演算
     sorted_planets = sorted([(p, deg) for p, deg in positions.items() if p in PLANET_SYMBOLS], key=lambda x: x[1])
-    allocated_radii = {}
-    occupied = []
-    for p, deg in sorted_planets:
-        r_level = 0.70
+    render_coords = {}
+    occupied_slots = []
+    
+    for p, original_deg in sorted_planets:
+        r_level = 0.76  # 提高初始半徑，留出內部空間給線條
+        adjusted_deg = original_deg
+        
         while True:
-            collision = False
-            for occ_deg, occ_r in occupied:
-                diff = abs((deg - occ_deg + 180) % 360 - 180)
-                if diff < 7.0 and abs(occ_r - r_level) < 0.01:
-                    collision = True
+            conflict = False
+            for occ_deg, occ_r in occupied_slots:
+                ang_diff = abs((adjusted_deg - occ_deg + 180) % 360 - 180)
+                # 加大碰撞角度判定為 7 度，確保符號絕不擠在一起
+                if ang_diff < 7.0 and abs(occ_r - r_level) < 0.01:
+                    conflict = True
                     break
-            if collision:
-                r_level -= 0.085  # 如果重疊，向內圈推移
+            
+            if conflict:
+                r_level -= 0.075  # 往內推移
+                adjusted_deg += 1.5   # 角度微調，產生錯位感
             else:
                 break
-        allocated_radii[p] = r_level
-        occupied.append((deg, r_level))
+                
+        render_coords[p] = (r_level, adjusted_deg)
+        occupied_slots.append((adjusted_deg, r_level))
 
-    for planet, deg in positions.items():
+    # 開始繪製星體與「指向內圈的線」
+    for planet, original_deg in positions.items():
         if planet not in PLANET_SYMBOLS: continue
-        angle = get_canvas_angle(deg); sym = PLANET_SYMBOLS[planet]; r = allocated_radii[planet]
         
-        # 2. 定位指示虛線：從星體「上方」畫到黃道內緣 (0.82)
-        ax.plot([angle, angle], [r + 0.05, 0.82], color=sym['color'], lw=0.8, alpha=0.6, linestyle=':')
+        r, draw_deg = render_coords[planet]
+        
+        actual_angle = get_canvas_angle(original_deg) # 真正的黃道經度
+        draw_angle = get_canvas_angle(draw_deg)       # 圖示實際渲染位置
+        sym = PLANET_SYMBOLS[planet]
+        
+        # 1. 畫指向內圈 (0.45 相位圈) 的連接線
+        # 起點是度數文字的下方 (r - 0.065)，終點是實際度數的 0.45 內圈，保證不遮擋文字
+        ax.plot([draw_angle, actual_angle], [r - 0.065, 0.45], color=sym['color'], lw=0.9, alpha=0.6, linestyle='-')
         
         f_size = 11 if planet in ['上升', '中天'] else 18
         f_weight = 'bold' if planet in ['上升', '中天'] else 'normal'
         
-        # 繪製星體符號
-        ax.text(angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
+        # 2. 繪製星體主要符號
+        ax.text(draw_angle, r, sym['sym'], fontsize=f_size, ha='center', va='center', color=sym['color'], fontweight=f_weight)
         
-        # 繪制度數文字 (位於星體下方，不被指示線遮擋)
-        ax.text(angle, r - 0.08, f"{int(deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
+        # 3. 繪制度數文字 (直接在符號正下方)
+        ax.text(draw_angle, r - 0.045, f"{int(original_deg % 30)}°", fontsize=8, ha='center', va='center', color='#555')
         
-        # 3. 逆行標記 (Retrograde 'R')：放置於星體左下角
+        # 4. 繪製逆行 R 標記 (精確定位在星體左下角，避開度數文字)
         if speeds and speeds.get(planet, 0) < 0 and planet in ['水星', '金星', '火星', '木星', '土星', '天王星', '海王星', '冥王星']:
-            ax.annotate('R', xy=(angle, r), xytext=(-12, -10), textcoords='offset points', 
-                        color='#c0392b', fontsize=8, fontweight='bold', ha='center', va='center')
+            # 使用 offset points：x往左 12 像素，y往下 6 像素，完美分離！
+            ax.annotate('R', xy=(draw_angle, r), xytext=(-12, -6), textcoords='offset points',
+                        color='#c0392b', fontsize=7.5, fontweight='bold', ha='right', va='top')
 
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=145)
@@ -361,7 +379,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 st.session_state.p_loc, st.session_state.p_year, st.session_state.p_month, 
                 st.session_state.p_day, st.session_state.p_hour, st.session_state.p_minute)
             
-            # 【注意】現在呼叫畫圖引擎有傳入 speed_n 作為最後一個參數了！
             pos_n, asc_n, cusps_n, mc_n, speed_n = calculate_chart_engine(jd_n, lat_n, lon_n, h_code)
             img_n = draw_astrology_chart(pos_n, asc_n, cusps_n, aspect_specs_full, a_sys_name, speeds=speed_n)
             
