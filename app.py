@@ -17,9 +17,9 @@ st.set_page_config(page_title="專業星盤系統", layout="wide")
 now = datetime.datetime.now()
 if 'n_year' not in st.session_state:
     st.session_state.update({
-        'n_year': 1993, 'n_month': 9, 'n_day': 27, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
+        'n_year': 1990, 'n_month': 1, 'n_day': 1, 'n_hour': 12, 'n_minute': 0, 'n_loc': "Manchester", 'name_input': "Vincent",
         'p_year': now.year, 'p_month': now.month, 'p_day': now.day, 'p_hour': now.hour, 'p_minute': now.minute, 'p_loc': "Manchester",
-        'target_age': now.year - 1993
+        'target_age': now.year - 1990
     })
 
 def set_current_time():
@@ -285,7 +285,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     return jd, lat, lon, info, utc_dt
 
 # ================= 3. Streamlit UI 介面 =================
-st.title("🔮 進階專業星盤推運系統")
+st.title("🔮 Mr vincent星盤系統")
 
 # --- 側邊欄：本命盤設定 ---
 st.sidebar.header("本命盤基本資訊")
