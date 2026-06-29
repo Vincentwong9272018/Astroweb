@@ -10,7 +10,7 @@ from geopy.geocoders import ArcGIS
 from timezonefinder import TimezoneFinder
 import pytz
 import requests 
-import itertools # 新增：用於格局排列組合運算
+import itertools
 
 st.set_page_config(page_title="專業星盤系統", layout="wide")
 
@@ -50,7 +50,6 @@ ZODIAC_SYMBOLS = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐',
 ZODIAC_NAMES = ['牡羊', '金牛', '雙子', '巨蟹', '獅子', '處女', '天秤', '天蠍', '射手', '摩羯', '水瓶', '雙魚']
 ZR_PERIODS = [15, 8, 20, 25, 19, 20, 8, 15, 12, 27, 30, 12] 
 
-# 十二星座與四元素、四正星座（三形態）對應關係 (星座索引0~11)
 ZODIAC_ELEMENTS = ['火', '土', '風', '水', '火', '土', '風', '水', '火', '土', '風', '水']
 ZODIAC_MODES = ['開創', '固定', '變動', '開創', '固定', '變動', '開創', '固定', '變動', '開創', '固定', '變動']
 
@@ -89,7 +88,7 @@ DIGNITIES = {
     '土星': {'廟': [9, 10], '旺': [6], '弱': [3, 4], '陷': [0]}
 }
 
-# ================= 2. 核心占星算法與格局引擎 =================
+# ================= 2. 核心占星算法 =================
 EPHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ephe')
 swe.set_ephe_path(EPHE_PATH)
 
@@ -105,8 +104,8 @@ def format_degree(lon):
 def get_house_number(lon, cusps, house_system):
     c_list = list(cusps)[1:] if len(cusps) == 13 else list(cusps)
     if house_system == b'W':
-        asc_sign = int(c_list[0] // 30)
-        p_sign = int(lon // 30)
+        asc_sign = int(c_list[0] // 30) % 12
+        p_sign = int(lon // 30) % 12
         return (p_sign - asc_sign) % 12 + 1
     for h in range(12):
         c1 = c_list[h]
@@ -147,7 +146,7 @@ def get_aspect_modifier_engine(p1, p2, target_angle, current_diff, jd, lat, lon,
     return ""
 
 def calc_zodiacal_releasing(lot_lon, birth_jd, target_jd):
-    start_sign = int(lot_lon // 30)
+    start_sign = int(lot_lon // 30) % 12
     total_days = target_jd - birth_jd
     if total_days < 0: return None, None, False
     l1_sign = start_sign
@@ -174,64 +173,50 @@ def calc_zodiacal_releasing(lot_lon, birth_jd, target_jd):
         else: break
     return l1_sign, l2_sign, is_lb
 
-# 【新增】高效特殊星體格局檢索分析引擎
 def find_astrology_patterns(positions):
     patterns = {"大三角": [], "大十字": [], "T三角": [], "風箏": [], "上帝之指": []}
     pts = [p for p in ALL_POINTS if p in positions]
     
-    # 建立快捷相差判定內建子函數 (格局判定統一使用較嚴格的標準客製化容許度)
     def is_asp(p1, p2, target, orb=6.0):
         d = abs(positions[p1] - positions[p2])
         if d > 180: d = 360 - d
         return abs(d - target) <= orb
 
-    # 1. 大三角 & T三角 & 上帝之指 (三星格局)
     for triple in itertools.combinations(pts, 3):
-        # 排除同星座限制
-        signs = [int(positions[p] // 30) for p in triple]
+        signs = [int(positions[p] // 30) % 12 for p in triple]
         if len(set(signs)) < 3: continue
         
         p1, p2, p3 = triple
-        # 大三角：任意兩兩 120° 且同元素
         if is_asp(p1, p2, 120) and is_asp(p2, p3, 120) and is_asp(p1, p3, 120):
             el1, el2, el3 = ZODIAC_ELEMENTS[signs[0]], ZODIAC_ELEMENTS[signs[1]], ZODIAC_ELEMENTS[signs[2]]
             if el1 == el2 == el3:
                 patterns["大三角"].append(f"{el1}元素大三角：{p1} - {p2} - {p3}")
                 
-        # T三角：兩星衝(180)，第三星(Apex)同時刑(90)此兩星
         for a, b, c in itertools.permutations(triple):
             if is_asp(a, b, 180) and is_asp(c, a, 90) and is_asp(c, b, 90):
-                mode = ZODIAC_MODES[signs[pts.index(c)]]
-                # 確保不重複加入
                 txt = f"{p1} - {p2} - {p3} (頂點: {c})"
                 if txt not in patterns["T三角"]: patterns["T三角"].append(txt)
                 
-        # 上帝之指 Yod：底部兩星六分相(60°)，兩星同時補十二分相(150°)射向 Apex 頂點
         for a, b, c in itertools.permutations(triple):
             if is_asp(a, b, 60) and is_asp(c, a, 150, orb=3.0) and is_asp(c, b, 150, orb=3.0):
                 txt = f"{a} - {b} - {c} (頂點: {c})"
                 if txt not in patterns["上帝之指"]: patterns["上帝之指"].append(txt)
 
-    # 2. 大十字 & 風箏 (四星格局)
     for quad in itertools.combinations(pts, 4):
-        signs = [int(positions[p] // 30) for p in quad]
+        signs = [int(positions[p] // 30) % 12 for p in quad]
         if len(set(signs)) < 4: continue
         p1, p2, p3, p4 = quad
         
-        # 大十字：各自兩組180，且四星不同星座同特質，兩兩90垂直
         for a, b, c, d in itertools.permutations(quad):
             if is_asp(a, b, 180) and is_asp(c, d, 180):
                 if is_asp(a, c, 90) and is_asp(a, d, 90) and is_asp(b, c, 90) and is_asp(b, d, 90):
-                    m1, m2, m3, m4 = ZODIAC_MODES[signs[0]], ZODIAC_MODES[signs[1]], ZODIAC_MODES[signs[2]], ZODIAC_MODES[signs[4] if len(signs)>4 else signs[3]]
+                    m1, m2, m3, m4 = ZODIAC_MODES[signs[0]], ZODIAC_MODES[signs[1]], ZODIAC_MODES[signs[2]], ZODIAC_MODES[signs[3]]
                     if m1 == m2 == m3 == m4:
                         txt = f"{a} - {c} - {b} - {d}"
                         if txt not in patterns["大十字"]: patterns["大十字"].append(txt)
                         
-        # 風箏 Kite：三星組成大三角，第四星與其中一星對衝(180)，並跟另外兩星形成六分相(60)
         for a, b, c, d in itertools.permutations(quad):
-            # 假設 a, b, c 形成大三角
             if is_asp(a, b, 120) and is_asp(b, c, 120) and is_asp(a, c, 120):
-                # 第四星 d 與 a 對衝，並六分相投射射向 b, c
                 if is_asp(d, a, 180) and is_asp(d, b, 60) and is_asp(d, c, 60):
                     txt = f"{a} - {b} - {c} - {d} (風箏頂點: {d})"
                     if txt not in patterns["風箏"]: patterns["風箏"].append(txt)
@@ -334,7 +319,7 @@ def resolve_location_and_time(loc_name, y, m, d, h, minute):
     return jd, lat, lon, info, utc_dt
 
 # ================= 5. Streamlit UI 介面 =================
-st.title("🔮 進階專業星盤推推運系統")
+st.title("🔮 進階專業星盤推運系統")
 
 # --- 側邊欄：本命盤設定 ---
 st.sidebar.header("本命盤基本資訊")
@@ -352,8 +337,8 @@ col5.number_input("分", key="n_minute", min_value=0, max_value=59)
 st.sidebar.text_input("出生城市", key="n_loc")
 
 btn_col1, btn_col2 = st.sidebar.columns(2)
-btn_col1.button("🕒 當下時間", on_click=set_current_time, use_container_width=True)
-btn_col2.button("📍 當下地點", on_click=set_current_loc, use_container_width=True)
+btn_col1.button("🕒 當下時間", on_click=set_current_time, width="stretch")
+btn_col2.button("📍 當下地點", on_click=set_current_loc, width="stretch")
 
 st.sidebar.divider()
 
@@ -390,7 +375,7 @@ if a_sys_name == "自訂":
 else:
     custom_orbs = {0: 8.0, 30: 0, 45: 0, 60: 6.0, 90: 7.0, 120: 7.0, 135: 0, 150: 0, 180: 8.0}
 
-# --- ⭐ 【新增】側邊欄：四元素與四正星座加權分數設定盒 ---
+# --- 側邊欄：四元素與四正星座加權分數設定盒 ---
 with st.sidebar.expander("📊 四元素與四正星座權重配分", expanded=False):
     st.caption("請輸入各星體被賦予的分數 (0~5 分)：")
     p_weights = {}
@@ -422,7 +407,7 @@ aspect_specs_full = [
 ]
 
 # --- 主計算按鈕 ---
-if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, type="primary"):
+if st.sidebar.button("🔮 執行占星整合計算", width="stretch", type="primary"):
     try:
         with st.spinner('天文運算與分析報告生成中...'):
             h_code = b'W' if "整宮" in h_sys_name else (b'R' if "Regiomontanus" in h_sys_name else b'P')
@@ -439,7 +424,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
             
             is_day = 7 <= get_house_number(pos_n['太陽'], cusps_n, h_code) <= 12
             
-            # --- ⭐ 【新增】四元素與四正星座計分邏輯 ---
             elements_score = {'火': 0, '土': 0, '風': 0, '水': 0}
             modes_score = {'開創': 0, '固定': 0, '變動': 0}
             for p in WEIGHT_POINTS:
@@ -449,13 +433,10 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                     elements_score[ZODIAC_ELEMENTS[z_idx]] += w
                     modes_score[ZODIAC_MODES[z_idx]] += w
             
-            # --- ⭐ 【新增】格局自動掃描 ---
             detected_patterns = find_astrology_patterns(pos_n)
 
-            # ================= 綜合觀測報告文字組合 =================
             report = f"== 命盤基本觀測 ==\n持有人：{st.session_state.name_input} ({gender})\n{meta_n}\n"
             
-            # ⭐ 【新增】報告中輸出四元素與四正星座計算
             report += "【四元素】\n"
             report += f"火：{elements_score['火']}   土：{elements_score['土']}   風：{elements_score['風']}   水：{elements_score['水']}\n"
             report += "【四正星座】\n"
@@ -481,7 +462,6 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
                 
                 report += f"{base_str}    {'   '.join(status_parts)}\n" if status_parts else f"{base_str}\n"
 
-            # ⭐ 【新增】報告中輸出大型特殊行星圖形(格局)
             report += "\n【行星圖形】\n"
             has_pattern = False
             for p_title, p_list in detected_patterns.items():
@@ -522,7 +502,7 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
             report += "\n【宮頭】\n"
             c_list_n = list(cusps_n)[1:] if len(cusps_n) == 13 else list(cusps_n)
             if chk_whole_rule:
-                asc_sign_idx = int(asc_n // 30)
+                asc_sign_idx = int(asc_n // 30) % 12
                 for i in range(12):
                     report += f"{i+1}宮：{ZODIAC_NAMES[(asc_sign_idx + i) % 12]}\n"
             else:
@@ -567,7 +547,7 @@ if st.sidebar.button("🔮 執行占星整合計算", use_container_width=True, 
 
             if chk_profection:
                 report += "\n\n【小限宮位管轄歲數 (0-75)】\n"
-                asc_sign_idx = int(asc_n // 30)
+                asc_sign_idx = int(asc_n // 30) % 12
                 for h in range(12):
                     if chk_whole_rule: sign_name = ZODIAC_NAMES[(asc_sign_idx + h) % 12]
                     else: sign_name = ZODIAC_NAMES[int(c_list_n[h] // 30) % 12]
